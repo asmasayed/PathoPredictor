@@ -1,0 +1,184 @@
+================================================================================
+PATHOPREDICTOR - SETUP INSTRUCTIONS
+================================================================================
+
+This file contains step-by-step instructions to set up and run the PathoPredictor project.
+
+================================================================================
+1. INITIAL SETUP (First Time Only)
+================================================================================
+
+OPTION A: Using Conda (Recommended)
+------------------------------------
+1. Navigate to project directory:
+   cd "c:\Users\hp\OneDrive\Attachments\Desktop\MINIPROJECT\pathopredictor"
+
+2. Create conda environment:
+   conda env create -f environment.yml
+
+3. Activate environment:
+   conda activate pathopredictor
+
+
+OPTION B: Using pip/Virtual Environment
+---------------------------------------
+1. Navigate to project directory:
+   cd "c:\Users\hp\OneDrive\Attachments\Desktop\MINIPROJECT\pathopredictor"
+
+2. Create virtual environment (optional but recommended):
+   python -m venv venv
+
+3. Activate virtual environment:
+   .\venv\Scripts\Activate.ps1
+
+4. Install dependencies:
+   pip install -r requirements.txt
+
+
+================================================================================
+2. RUN THE MAIN PIPELINE
+================================================================================
+
+Make sure you're in the project directory and environment is activated, then run:
+
+   python run_pipeline.py
+
+This will execute all modules in sequence:
+   - Module 1: Genomic LLM (DN-BERT)
+   - Module 2: Host Risk Classifier
+   - Module 2: Parameter Regressor
+   - Module 3: LSTM Time Series Model
+
+
+================================================================================
+3. START THE API SERVER
+================================================================================
+
+To start the FastAPI server for predictions:
+
+   python -m src.api.main
+
+OR using uvicorn directly:
+
+   uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+
+After starting, access:
+   - API: http://localhost:8000
+   - API Documentation: http://localhost:8000/docs
+   - Alternative docs: http://localhost:8000/redoc
+
+
+================================================================================
+4. RUN TESTS
+================================================================================
+
+Run all tests:
+   python -m pytest tests/
+
+Run specific test file:
+   python -m pytest tests/test_preprocessing.py
+   python -m pytest tests/test_seir.py
+   python -m pytest tests/test_models.py
+
+Run with verbose output:
+   python -m pytest tests/ -v
+
+
+================================================================================
+5. START JUPYTER NOTEBOOKS
+================================================================================
+
+Start Jupyter notebook server:
+   jupyter notebook
+
+OR use JupyterLab:
+   jupyter lab
+
+Then navigate to notebooks/ directory in the browser to access:
+   - exploration_module1.ipynb
+   - exploration_module2.ipynb
+   - exploration_module3.ipynb
+   - experiments.ipynb
+
+
+================================================================================
+6. RUN INDIVIDUAL MODULES
+================================================================================
+
+Train Module 1 (Genomic LLM):
+   python -m src.module1_genomic_llm.train_dnbert
+
+Train Module 2 Classifier:
+   python -m src.module2_classifier.train_classifier
+
+Train Module 2 Regressor:
+   python -m src.module2_regressor.train_regressor
+
+Train Module 3 (LSTM):
+   python -m src.module3_lstm.train_lstm
+
+
+================================================================================
+QUICK START SUMMARY
+================================================================================
+
+For a quick start, run these commands in order:
+
+1. Navigate to project:
+   cd "c:\Users\hp\OneDrive\Attachments\Desktop\MINIPROJECT\pathopredictor"
+
+2. Activate environment:
+   conda activate pathopredictor
+   OR
+   .\venv\Scripts\Activate.ps1
+
+3. Run the pipeline:
+   python run_pipeline.py
+
+
+================================================================================
+IMPORTANT NOTES
+================================================================================
+
+Before running the pipeline, ensure:
+   - Data files are placed in data/raw/ directories:
+     * data/raw/genomic_fasta/
+     * data/raw/host_metadata/
+     * data/raw/phenotype_data/
+     * data/raw/time_series/
+   
+   - Models will be saved to models/ directories:
+     * models/module1_dnbert/
+     * models/module2_classifier/
+     * models/module2_regressor/
+     * models/module3_lstm/
+   
+   - Check src/config/config.py for configuration settings
+   
+   - Processed data will be saved to data/processed/ directories
+
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+If you encounter import errors:
+   - Make sure you're in the project root directory
+   - Ensure the environment is activated
+   - Verify all dependencies are installed: pip install -r requirements.txt
+
+If conda environment creation fails:
+   - Try: conda env create -f environment.yml --force
+   - Or use pip option instead
+
+If API server doesn't start:
+   - Check if port 8000 is already in use
+   - Try a different port: uvicorn src.api.main:app --port 8001
+
+For Windows PowerShell execution policy issues:
+   - Run: Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+
+================================================================================
+END OF SETUP INSTRUCTIONS
+================================================================================

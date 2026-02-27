@@ -4,6 +4,7 @@ Main pipeline script for PathoPredictor.
 
 import sys
 import os
+from initialize_vocab import initialize_genomic_vocabulary
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
@@ -19,6 +20,11 @@ def run_pipeline():
     """Run the complete PathoPredictor pipeline."""
     print("Starting PathoPredictor pipeline...")
     
+    # Step 1: Initialize Vocabulary
+    # This prepares the vocab.json that all subsequent modules will use
+    print("\n=== Step 1: Initializing Genomic Vocabulary ===")
+    initialize_genomic_vocabulary() 
+
     # Module 1: Train genomic LLM
     print("\n=== Module 1: Genomic LLM ===")
     from src.module1_genomic_llm.train_dnbert import train_dnbert

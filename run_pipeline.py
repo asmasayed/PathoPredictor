@@ -42,7 +42,12 @@ def run_pipeline():
     # Module 3: Train LSTM
     print("\n=== Module 3: LSTM ===")
     from src.module3_lstm.train_lstm import train_lstm
-    train_lstm(MODULE3_CONFIG)
+    recent_memory, scaler, last_real_cases = train_lstm(MODULE3_CONFIG)
+    
+    # MODULE 4: SEIR Simulation (YOUR HYBRID ENGINE)
+    print("\n=== Module 4: SEIR Simulation ===")
+    from src.simulation.seir_sim import run_simulation
+    run_simulation(recent_memory, scaler, last_real_cases)
     
     print("\nPipeline completed successfully!")
 

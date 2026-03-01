@@ -22,8 +22,8 @@ def run_pipeline():
     
     # Step 1: Initialize Vocabulary
     # This prepares the vocab.json that all subsequent modules will use
-    print("\n=== Step 1: Initializing Genomic Vocabulary ===")
-    initialize_genomic_vocabulary() 
+    # print("\n=== Step 1: Initializing Genomic Vocabulary ===")
+    # initialize_genomic_vocabulary() 
 
     # Module 1: Train genomic LLM
     print("\n=== Module 1: Genomic LLM ===")

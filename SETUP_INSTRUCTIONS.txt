@@ -179,6 +179,15 @@ For Windows PowerShell execution policy issues:
    - Run: Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 
+FOR PYTORCH
+# CPU
+conda install pytorch torchvision torchaudio -c pytorch
+pip install transformers
+
+# GPU
+conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
+pip install transformers
+
 ================================================================================
 END OF SETUP INSTRUCTIONS
 ================================================================================

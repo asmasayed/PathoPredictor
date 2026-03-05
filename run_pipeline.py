@@ -27,17 +27,17 @@ def run_pipeline():
 
     # Module 1: Train genomic LLM
     print("\n=== Module 1: Genomic LLM ===")
-    from src.module1_genomic_llm.train_dnbert import train_dnbert
-    train_dnbert(MODULE1_CONFIG)
+    #from src.module1_genomic_llm.train_dnbert import train_dnbert
+    #train_dnbert(MODULE1_CONFIG)
     
     # Module 2: Train classifier and regressor
     print("\n=== Module 2: Classifier ===")
-    from src.module2_classifier.train_classifier import train_classifier
-    train_classifier(MODULE2_CLASSIFIER_CONFIG)
+    #from src.module2_classifier.train_classifier import train_classifier
+    #train_classifier(MODULE2_CLASSIFIER_CONFIG)
     
     print("\n=== Module 2: Regressor ===")
-    from src.module2_regressor.train_regressor import train_regressor
-    train_regressor(MODULE2_REGRESSOR_CONFIG)
+    #from src.module2_regressor.train_regressor import train_regressor
+    #train_regressor(MODULE2_REGRESSOR_CONFIG)
     
     # Module 3: Train LSTM
     print("\n=== Module 3: LSTM ===")
@@ -53,3 +53,4 @@ def run_pipeline():
 
 if __name__ == "__main__":
     run_pipeline()
+    import build_dashboard

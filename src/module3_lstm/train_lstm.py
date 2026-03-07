@@ -9,13 +9,14 @@ from src.module3_lstm.model import LSTMModel
 
 def train_lstm(config):
     print("Loading Time-Series Dataset...")
-    # It looks in your friend's specified data folder
-    csv_files = glob.glob("data/raw/time_series/*.csv")
     
-    if len(csv_files) == 0:
-        raise FileNotFoundError("No CSV file found in data/raw/time_series/! Please add your dataset.")
+    # NEW SAFE CODE: We explicitly target the outbreaks dataset so it doesn't accidentally load the map data
+    target_file = "data/raw/time_series/h5n1_us_outbreaks.csv"
+    
+    if not os.path.exists(target_file):
+        raise FileNotFoundError(f"Could not find {target_file}! Did you run get_data.py?")
         
-    df = pd.read_csv(csv_files[0])
+    df = pd.read_csv(target_file)
     
     # Assuming your dataset has columns named 'Date' and 'Cases' (or similar). 
     # Update these string names if your CSV uses different column headers!

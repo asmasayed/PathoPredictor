@@ -1,3 +1,11 @@
+import os
+import sys
+# --- PATH FIX ---
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(current_dir, "../../"))
+sys.path.insert(0, project_root)
+# ----------------
+
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -7,11 +15,18 @@ from src.simulation.parameters import SEIRParameters
 from src.simulation.seir_model import simulate_seir
 from src.config.config import SEIR_DEFAULT_PARAMS
 
-def run_simulation(recent_memory, scaler, last_real_cases):
-    print("Initializing Hybrid SEIR Engine...")
+# 1. ADD REGION AND POPULATION VARIABLES
+def run_simulation(recent_memory, scaler, last_real_cases, region="us", N=600000):
+    print(f"Initializing Hybrid SEIR Engine for {region.upper()}...")
     
     model = LSTMModel()
-    model.load_state_dict(torch.load("models/module3_lstm/lstm_brain.pth", weights_only=True))
+    
+    # 2. DYNAMIC BRAIN LOADING: Load the specific AI trained for this climate
+    brain_path = f"models/module3_lstm/lstm_brain_{region}.pth"
+    if not os.path.exists(brain_path):
+        raise FileNotFoundError(f"Could not find AI brain: {brain_path}. Did you train it?")
+        
+    model.load_state_dict(torch.load(brain_path, weights_only=True))
     
     params = SEIRParameters(
         beta=SEIR_DEFAULT_PARAMS.get("beta", 0.3),
@@ -19,7 +34,6 @@ def run_simulation(recent_memory, scaler, last_real_cases):
         sigma=SEIR_DEFAULT_PARAMS.get("sigma", 0.2)
     )
     
-    N = 600000 
     I0 = max(5, last_real_cases)
     E0, R0 = I0 * 2, 0
     S0 = N - I0 - E0 - R0
@@ -29,31 +43,36 @@ def run_simulation(recent_memory, scaler, last_real_cases):
     SIM_DAYS = 60
     
     for day in range(SIM_DAYS):
+        # The AI predicts tomorrow's transmission rate based on the last 5 days
         pred_beta = predict_beta_adjustment(model, recent_memory)
         params.update_beta(pred_beta)
         
         t_span = np.array([0, 1])
+        # The Calculus Engine calculates exactly how many animals get sick/recover
         result = simulate_seir(current_state, t_span, params.beta, params.gamma, params.sigma, N)
         current_state = result[1]
         
-        hist_S.append(current_state[0])
-        hist_E.append(current_state[1])
-        hist_I.append(current_state[2])
-        hist_R.append(current_state[3])
+        hist_S.append(int(current_state[0]))
+        hist_E.append(int(current_state[1]))
+        hist_I.append(int(current_state[2]))
+        hist_R.append(int(current_state[3]))
 
+        # Update the memory tensor for the next day's prediction
         new_infection_scaled = scaler.transform([[current_state[2]]])[0].tolist()
         recent_memory.pop(0)
         recent_memory.append(new_infection_scaled)
 
-    plt.figure(figsize=(12, 6))
-    plt.plot(hist_S, label='Susceptible', color='blue', linestyle='--')
-    plt.plot(hist_E, label='Exposed (Incubating)', color='orange')
-    plt.plot(hist_I, label='Infectious (Spreading)', color='red', linewidth=3)
-    plt.plot(hist_R, label='Recovered', color='green')
-    plt.title("PathoPredictor: AI-Augmented Epidemic Forecast", fontsize=14, fontweight='bold')
-    plt.xlabel("Days Forecasted")
-    plt.ylabel("Population Count")
-    plt.legend()
-    plt.grid(alpha=0.3)
-    plt.tight_layout()
-    plt.show()
+    # 3. FREE THE DATA: Instead of trapping the data in plt.show(), we return it!
+    # (We can still print a success message)
+    print(f"✅ 60-Day Forecast calculated for {region.upper()}.")
+    
+    return {
+        "S": hist_S,
+        "E": hist_E,
+        "I": hist_I,
+        "R": hist_R
+    }
+
+# Safe test block if you run the file directly
+if __name__ == "__main__":
+    print("This is the math engine module. It should be called from run_pipeline.py.")

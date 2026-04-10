@@ -9,7 +9,7 @@ project_root = Path(__file__).resolve().parent
 sys.path.insert(0, str(project_root))
 
 from src.module1_genomic_llm.module1_pipeline import run_module1
-from src.module3_lstm.module3_pipeline import run_module3_seir
+#from src.module3_lstm.module3_pipeline import run_module3_seir
 
 def run_pipeline():
     print("Starting PathoPredictor Global Pipeline...")

@@ -2,16 +2,30 @@
 PathoPredictor Main API Gateway
 Built with FastAPI to serve predictions to the React frontend.
 """
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pathlib import Path
-import tempfile
-import json
 import os
+import json
+import tempfile
+from pathlib import Path
+from typing import List, Optional, Tuple
 
-# Import Module 1 API Functions
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
+
+# --- Module 1 Imports ---
 from src.module1_genomic_llm.process_uploaded_fasta import clean_uploaded_fasta
 from src.module1_genomic_llm.generate_mutations import process_file
+
+# --- Module 2 & 3 Imports ---
+from src.config.config import MODULE2_CLASSIFIER_CONFIG, MODULE2_REGRESSOR_CONFIG
+from src.module2_data.dnabert_embedding import compute_embedding_vector
+from src.module2_assessment import run_phenotype_assessment
+from src.integration.seir_projection import (
+    project_seir_using_module2_parameters,
+    run_hybrid_seir_with_module2_rates,
+)
 
 app = FastAPI(
     title="PathoPredictor API",
@@ -31,6 +45,103 @@ app.add_middleware(
 # Define the absolute path to your model
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MODEL_DIR = PROJECT_ROOT / "models" / "module1_dnbert"
+STATIC_DIR = PROJECT_ROOT / "static"
+
+if STATIC_DIR.is_dir():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+class PhenotypeRequest(BaseModel):
+    embedding: List[float]
+    sequence: Optional[str] = None
+    include_seir_projection: bool = False
+    population_N: int = 600000
+    projection_days: int = 60
+    seir_region: str = "us"
+
+
+def _first_record_from_cleaned_json(cleaned_json_string: str) -> Tuple[str, str]:
+    data = json.loads(cleaned_json_string)
+    if isinstance(data, dict) and "error" in data:
+        raise ValueError(data.get("error", "Cleaning failed"))
+    if isinstance(data, list):
+        if not data:
+            raise ValueError("Cleaned JSON has no records.")
+        record = data[0]
+    else:
+        record = data
+    sequence = record.get("sequence")
+    strain_id = record.get("strain_id", "unknown")
+    if not sequence:
+        raise ValueError("Cleaned record has no sequence.")
+    return str(strain_id), str(sequence)
+
+
+def _cleaner_error_message(cleaned_json_string: str) -> Optional[str]:
+    try:
+        data = json.loads(cleaned_json_string)
+        if isinstance(data, dict) and "error" in data:
+            return str(data["error"])
+    except json.JSONDecodeError:
+        return "Cleaning produced invalid JSON."
+    return None
+
+
+async def _optional_seir_from_phenotype(
+    phenotype_bundle: dict,
+    include: bool,
+    population_n: int,
+    projection_days: int,
+    seir_region: str = "us",
+):
+    """
+    Run Module 3 hybrid SEIR+LSTM (`seir_sim.run_simulation`) seeded with Module 2 β/γ/σ when
+    ``models/module3_lstm/lstm_brain_{region}.pth`` exists; otherwise fall back to classical SEIR only.
+    """
+    if not include:
+        return None
+    ep = phenotype_bundle.get("epidemiological_parameters") or {}
+    beta = ep.get("beta")
+    gamma = ep.get("gamma")
+    sigma = ep.get("sigma")
+    if beta is None or gamma is None or sigma is None:
+        return None
+
+    region_key = str(seir_region).lower().strip()
+
+    def _run():
+        try:
+            return run_hybrid_seir_with_module2_rates(
+                float(beta),
+                float(gamma),
+                float(sigma),
+                N=int(population_n),
+                days=int(projection_days),
+                region=region_key,
+            )
+        except FileNotFoundError:
+            return project_seir_using_module2_parameters(
+                float(beta),
+                float(gamma),
+                float(sigma),
+                N=int(population_n),
+                days=int(projection_days),
+            )
+
+    return await run_in_threadpool(_run)
+
+
+def _ensure_module2_artifacts_or_raise() -> None:
+    clf_path = Path(MODULE2_CLASSIFIER_CONFIG["model_bundle_path"])
+    meta_path = Path(MODULE2_REGRESSOR_CONFIG["meta_path"])
+    if not clf_path.is_file() or not meta_path.is_file():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Module 2 artifacts missing. Run: python -m src.module2_classifier.train_classifier && "
+                "python -m src.module2_regressor.train_regressor"
+            ),
+        )
 
 
 @app.get("/")
@@ -39,10 +150,20 @@ async def root():
 
 
 @app.post("/api/module1/predict-mutations")
-async def predict_mutations(file: UploadFile = File(...)):
+async def predict_mutations(
+    file: UploadFile = File(...),
+    include_module2: bool = Form(False),
+    include_seir_projection: bool = Form(False),
+    seir_population_n: int = Form(600000),
+    projection_days: int = Form(60),
+    seir_region: str = Form("us"),
+):
     """
     Endpoint for the React drag-and-drop feature.
     Accepts a .fasta file, cleans it, and returns predicted mutations.
+    Set include_module2=true (multipart form) to also run DNABERT embedding → Module 2 on the same sequence.
+    Set include_seir_projection=true (with include_module2) to run hybrid Module 3 when LSTM weights exist,
+    seeding γ/σ and first-step β from Module 2; otherwise classical SEIR only.
     """
     # 1. Validate the file type
     if not file.filename.endswith(('.fasta', '.fa', '.txt')):
@@ -61,10 +182,14 @@ async def predict_mutations(file: UploadFile = File(...)):
 
             # 3. Clean the FASTA file
             cleaned_json_string = clean_uploaded_fasta(str(temp_fasta_path))
-            
-            # Check if the cleaner threw an error
+
+            # Catch errors generated by the cleaner
             if "error" in cleaned_json_string.lower():
                 raise HTTPException(status_code=422, detail=f"Data cleaning failed: {cleaned_json_string}")
+            
+            cerr = _cleaner_error_message(cleaned_json_string)
+            if cerr is not None:
+                raise HTTPException(status_code=422, detail=cerr)
 
             # Save the clean JSON so the mutation generator can read it
             with open(temp_json_path, "w") as f:
@@ -73,7 +198,7 @@ async def predict_mutations(file: UploadFile = File(...)):
             # 4. Generate the Mutations using your RTX 4050
             if not MODEL_DIR.exists():
                 raise HTTPException(status_code=503, detail="DNABERT model not found. Please train Module 1 first.")
-                
+
             mutation_results_string = process_file(str(temp_json_path), str(MODEL_DIR))
 
             # 5. Parse the string back into a Python dictionary so FastAPI can send it as proper JSON
@@ -83,7 +208,127 @@ async def predict_mutations(file: UploadFile = File(...)):
             if "error" in final_json:
                 raise HTTPException(status_code=500, detail=final_json["error"])
 
+            if include_seir_projection and not include_module2:
+                raise HTTPException(
+                    status_code=400,
+                    detail="include_seir_projection requires include_module2=true.",
+                )
+
+            # 6. Optional: Execute Module 2 and SEIR projections 
+            if include_module2:
+                _ensure_module2_artifacts_or_raise()
+                try:
+                    _, sequence = _first_record_from_cleaned_json(cleaned_json_string)
+                except ValueError as exc:
+                    raise HTTPException(status_code=422, detail=str(exc))
+                
+                embedding = await run_in_threadpool(
+                    compute_embedding_vector, sequence, str(MODEL_DIR)
+                )
+                phenotype = run_phenotype_assessment(
+                    embedding.tolist(),
+                    sequence=sequence,
+                )
+                final_json["embedding"] = embedding.tolist()
+                final_json["module2_phenotype"] = phenotype
+                
+                traj = await _optional_seir_from_phenotype(
+                    phenotype,
+                    include_seir_projection,
+                    seir_population_n,
+                    projection_days,
+                    seir_region=seir_region,
+                )
+                if traj is not None:
+                    final_json["seir_projection"] = traj
+
             return final_json
 
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"An internal error occurred: {str(e)}")
+
+
+@app.post("/api/module2/phenotype-from-fasta")
+async def phenotype_from_fasta(
+    file: UploadFile = File(...),
+    include_seir_projection: bool = Form(False),
+    seir_population_n: int = Form(600000),
+    projection_days: int = Form(60),
+    seir_region: str = Form("us"),
+):
+    """
+    Clean FASTA → DNABERT embedding (Module 1 checkpoint) → Module 2 phenotype.
+    Single upload; no manual embedding paste.
+
+    Multipart toggles:
+    include_seir_projection=true — hybrid Module 3 when lstm_brain_{region}.pth exists else classical SEIR.
+    """
+    if not file.filename.endswith(('.fasta', '.fa', '.txt')):
+        raise HTTPException(status_code=400, detail="Invalid file format. Please upload a FASTA file.")
+    if not MODEL_DIR.exists():
+        raise HTTPException(status_code=503, detail="DNABERT model not found. Expected: models/module1_dnbert")
+
+    _ensure_module2_artifacts_or_raise()
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_fasta_path = Path(temp_dir) / "upload.fasta"
+        with open(temp_fasta_path, "wb") as buffer:
+            buffer.write(await file.read())
+
+        cleaned_json_string = clean_uploaded_fasta(str(temp_fasta_path))
+        cerr = _cleaner_error_message(cleaned_json_string)
+        if cerr is not None:
+            raise HTTPException(status_code=422, detail=cerr)
+
+        try:
+            strain_id, sequence = _first_record_from_cleaned_json(cleaned_json_string)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+        embedding = await run_in_threadpool(compute_embedding_vector, sequence, str(MODEL_DIR))
+        phenotype = run_phenotype_assessment(embedding.tolist(), sequence=sequence)
+
+    traj = await _optional_seir_from_phenotype(
+        phenotype,
+        include_seir_projection,
+        seir_population_n,
+        projection_days,
+        seir_region=seir_region,
+    )
+
+    payload = {
+        "strain_id": strain_id,
+        "sequence_length": len(sequence),
+        "embedding": embedding.tolist(),
+        "module2_phenotype": phenotype,
+    }
+    if traj is not None:
+        payload["seir_projection"] = traj
+    return payload
+
+
+@app.post("/api/module2/phenotype")
+async def phenotype_endpoint(body: PhenotypeRequest):
+    """
+    Module 2 only: host adaptation score + predicted SEIR-related parameters from an embedding vector.
+    Train models first (see SETUP_INSTRUCTIONS.txt Module 2).
+    """
+    _ensure_module2_artifacts_or_raise()
+    try:
+        out = run_phenotype_assessment(body.embedding, sequence=body.sequence)
+        traj = await _optional_seir_from_phenotype(
+            out,
+            body.include_seir_projection,
+            body.population_N,
+            body.projection_days,
+            seir_region=body.seir_region,
+        )
+        if traj is not None:
+            out = {**out, "seir_projection": traj}
+        return out
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))

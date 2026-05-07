@@ -16,7 +16,22 @@ from src.simulation.seir_model import simulate_seir
 from src.config.config import SEIR_DEFAULT_PARAMS
 
 # 1. ADD REGION AND POPULATION VARIABLES
-def run_simulation(recent_memory, scaler, last_real_cases, region="us", N=600000):
+def run_simulation(
+    recent_memory,
+    scaler,
+    last_real_cases,
+    region="us",
+    N=600000,
+    beta=None,
+    gamma=None,
+    sigma=None,
+    sim_days=60,
+):
+    """
+    Hybrid SEIR: LSTM proposes beta each day after the first timestep.
+    If ``beta`` (from Module 2) is supplied, timestep 0 uses that beta together with
+    ``gamma``/``sigma``; later days keep Module 2 γ/σ while β is updated by the LSTM.
+    """
     print(f"Initializing Hybrid SEIR Engine for {region.upper()}...")
     
     model = LSTMModel()
@@ -25,14 +40,19 @@ def run_simulation(recent_memory, scaler, last_real_cases, region="us", N=600000
     brain_path = f"models/module3_lstm/lstm_brain_{region}.pth"
     if not os.path.exists(brain_path):
         raise FileNotFoundError(f"Could not find AI brain: {brain_path}. Did you train it?")
-        
-    model.load_state_dict(torch.load(brain_path, weights_only=True))
+    try:
+        state = torch.load(brain_path, map_location="cpu", weights_only=True)
+    except TypeError:
+        state = torch.load(brain_path, map_location="cpu")
+    model.load_state_dict(state)
     
     params = SEIRParameters(
-        beta=SEIR_DEFAULT_PARAMS.get("beta", 0.3),
-        gamma=SEIR_DEFAULT_PARAMS.get("gamma", 0.1),
-        sigma=SEIR_DEFAULT_PARAMS.get("sigma", 0.2)
+        beta=SEIR_DEFAULT_PARAMS.get("beta", 0.3) if beta is None else beta,
+        gamma=SEIR_DEFAULT_PARAMS.get("gamma", 0.1) if gamma is None else gamma,
+        sigma=SEIR_DEFAULT_PARAMS.get("sigma", 0.2) if sigma is None else sigma,
     )
+    
+    module2_beta_supplied = beta is not None
     
     I0 = max(5, last_real_cases)
     E0, R0 = I0 * 2, 0
@@ -40,13 +60,13 @@ def run_simulation(recent_memory, scaler, last_real_cases, region="us", N=600000
     current_state = [S0, E0, I0, R0]
     
     hist_S, hist_E, hist_I, hist_R = [S0], [E0], [I0], [R0]
-    SIM_DAYS = 60
     
-    for day in range(SIM_DAYS):
-        # The AI predicts tomorrow's transmission rate based on the last 5 days
-        pred_beta = predict_beta_adjustment(model, recent_memory)
-        params.update_beta(pred_beta)
-        
+    for day in range(int(sim_days)):
+        # Timestep 0 can keep Module-2-supplied beta; afterward LSTM drives beta.
+        if (not module2_beta_supplied) or day > 0:
+            pred_beta = predict_beta_adjustment(model, recent_memory)
+            params.update_beta(pred_beta)
+
         t_span = np.array([0, 1])
         # The Calculus Engine calculates exactly how many animals get sick/recover
         result = simulate_seir(current_state, t_span, params.beta, params.gamma, params.sigma, N)
@@ -64,7 +84,7 @@ def run_simulation(recent_memory, scaler, last_real_cases, region="us", N=600000
 
     # 3. FREE THE DATA: Instead of trapping the data in plt.show(), we return it!
     # (We can still print a success message)
-    print(f"✅ 60-Day Forecast calculated for {region.upper()}.")
+    print(f"✅ {int(sim_days)}-Day Forecast calculated for {region.upper()}.")
     
     return {
         "S": hist_S,

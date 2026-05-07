@@ -204,6 +204,21 @@ body {
   padding: 1.5rem;
   box-shadow: 0 2px 4px rgba(0,0,0,0.05);
   border-top: 4px solid var(--border-color);
+  cursor: pointer;
+  transition: transform 0.08s ease, box-shadow 0.12s ease, outline 0.12s ease;
+}
+
+.prediction-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.08);
+}
+
+.prediction-card:focus {
+  outline: none;
+}
+
+.prediction-card.selected {
+  outline: 3px solid rgba(229, 62, 62, 0.35);
 }
 
 .prediction-card.original {
@@ -256,4 +271,48 @@ body {
   color: var(--text-muted);
   line-height: 1.4;
   margin: 0;
+}
+
+.module2-controls {
+  margin-bottom: 1.5rem;
+}
+
+.module2-controls .hint {
+  margin: 0 0 0.75rem 0;
+  color: var(--text-muted);
+}
+
+.selected-chip {
+  margin-top: 0.75rem;
+  background: #fff5f5;
+  border: 1px solid #fed7d7;
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  color: var(--text-main);
+}
+
+.module2-results {
+  margin-bottom: 2rem;
+}
+
+.module2-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.module2-card {
+  background: var(--card-bg);
+  padding: 1.25rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  border: 1px solid var(--border-color);
+}
+
+.module2-card h4 {
+  margin: 0 0 0.75rem 0;
+}
+
+.module2-card p {
+  margin: 0.4rem 0;
 }

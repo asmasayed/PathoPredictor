@@ -153,6 +153,7 @@ async def root():
 async def predict_mutations(
     file: UploadFile = File(...),
     include_module2: bool = Form(False),
+    selected_prediction_index: Optional[int] = Form(None),
     include_seir_projection: bool = Form(False),
     seir_population_n: int = Form(600000),
     projection_days: int = Form(60),
@@ -161,7 +162,8 @@ async def predict_mutations(
     """
     Endpoint for the React drag-and-drop feature.
     Accepts a .fasta file, cleans it, and returns predicted mutations.
-    Set include_module2=true (multipart form) to also run DNABERT embedding → Module 2 on the same sequence.
+    Set include_module2=true (multipart form) to also run DNABERT embedding → Module 2.
+    Optionally set selected_prediction_index=0..3 to run Module 2 on the chosen mutation candidate.
     Set include_seir_projection=true (with include_module2) to run hybrid Module 3 when LSTM weights exist,
     seeding γ/σ and first-step β from Module 2; otherwise classical SEIR only.
     """
@@ -221,16 +223,65 @@ async def predict_mutations(
                     _, sequence = _first_record_from_cleaned_json(cleaned_json_string)
                 except ValueError as exc:
                     raise HTTPException(status_code=422, detail=str(exc))
-                
+
+                sequence_for_module2 = sequence
+                selected_pred = None
+                if selected_prediction_index is not None:
+                    try:
+                        idx = int(selected_prediction_index)
+                    except Exception:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="selected_prediction_index must be an integer in 0..3.",
+                        )
+                    preds = final_json.get("predictions") or []
+                    if not isinstance(preds, list) or len(preds) != 4:
+                        raise HTTPException(
+                            status_code=500,
+                            detail="Module 1 predictions are missing or invalid; expected 4 predictions.",
+                        )
+                    if idx < 0 or idx >= len(preds):
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"selected_prediction_index out of range: {idx}. Expected 0..{len(preds)-1}.",
+                        )
+                    selected_pred = preds[idx]
+                    nuc = str(selected_pred.get("nucleotide", "")).upper().strip()
+                    if nuc not in {"A", "T", "C", "G"}:
+                        raise HTTPException(
+                            status_code=500,
+                            detail="Selected prediction is missing a valid nucleotide (A/T/C/G).",
+                        )
+                    try:
+                        t_idx = int(final_json.get("target_index"))
+                    except Exception:
+                        raise HTTPException(
+                            status_code=500,
+                            detail="Module 1 output is missing a valid target_index.",
+                        )
+                    if t_idx < 0 or t_idx >= len(sequence):
+                        raise HTTPException(
+                            status_code=500,
+                            detail="Module 1 target_index is out of range for the uploaded sequence.",
+                        )
+                    sequence_for_module2 = sequence[:t_idx] + nuc + sequence[t_idx + 1 :]
+
                 embedding = await run_in_threadpool(
-                    compute_embedding_vector, sequence, str(MODEL_DIR)
+                    compute_embedding_vector, sequence_for_module2, str(MODEL_DIR)
                 )
                 phenotype = run_phenotype_assessment(
                     embedding.tolist(),
-                    sequence=sequence,
+                    sequence=sequence_for_module2,
                 )
                 final_json["embedding"] = embedding.tolist()
                 final_json["module2_phenotype"] = phenotype
+                if selected_pred is not None:
+                    final_json["selected_prediction_index"] = int(selected_prediction_index)
+                    final_json["selected_prediction"] = selected_pred
+                    # Convenience aliases for "alpha/beta/gamma" naming (alpha ≡ sigma here).
+                    ep = (phenotype.get("epidemiological_parameters") or {}).copy()
+                    ep.setdefault("alpha", ep.get("sigma"))
+                    final_json["module2_phenotype"]["epidemiological_parameters"] = ep
                 
                 traj = await _optional_seir_from_phenotype(
                     phenotype,

@@ -6,8 +6,10 @@ function App() {
   const [file, setFile] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isModule2Loading, setIsModule2Loading] = useState(false);
   const [results, setResults] = useState(null);
   const [error, setError] = useState(null);
+  const [selectedPredictionIndex, setSelectedPredictionIndex] = useState(null);
   const fileInputRef = useRef(null);
 
   // Drag and Drop Handlers
@@ -36,6 +38,7 @@ function App() {
   const validateAndSetFile = (selectedFile) => {
     setError(null);
     setResults(null);
+    setSelectedPredictionIndex(null);
     if (selectedFile && (selectedFile.name.endsWith('.fasta') || selectedFile.name.endsWith('.fa') || selectedFile.name.endsWith('.txt'))) {
       setFile(selectedFile);
     } else {
@@ -49,6 +52,7 @@ function App() {
 
     setIsLoading(true);
     setError(null);
+    setSelectedPredictionIndex(null);
 
     const formData = new FormData();
     formData.append("file", file);
@@ -74,11 +78,46 @@ function App() {
     }
   };
 
+  const runModule2OnSelected = async () => {
+    if (!file || selectedPredictionIndex === null) return;
+
+    setIsModule2Loading(true);
+    setError(null);
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("include_module2", "true");
+    formData.append("selected_prediction_index", String(selectedPredictionIndex));
+
+    try {
+      const response = await fetch("http://localhost:8000/api/module1/predict-mutations", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Failed to run Module 2 on selected variant.");
+      }
+
+      setResults(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsModule2Loading(false);
+    }
+  };
+
   const resetTool = () => {
     setFile(null);
     setResults(null);
     setError(null);
+    setSelectedPredictionIndex(null);
   };
+
+  const ep = results?.module2_phenotype?.epidemiological_parameters || null;
+  const host = results?.module2_phenotype?.human_adaptation || null;
 
   return (
     <div className="app-container">
@@ -156,10 +195,61 @@ function App() {
               <p><strong>Original Nucleotide:</strong> {results.original_nucleotide}</p>
             </div>
 
+            <div className="module2-controls">
+              <p className="hint">
+                Click a variant below to select it, then run Module 2 (host risk + alpha/beta/gamma).
+              </p>
+              <button
+                className={`action-btn ${selectedPredictionIndex === null || isModule2Loading ? 'disabled' : ''}`}
+                onClick={runModule2OnSelected}
+                disabled={selectedPredictionIndex === null || isModule2Loading}
+              >
+                {isModule2Loading ? (
+                  <><RefreshCw className="spinner" /> Running Module 2...</>
+                ) : (
+                  <><Activity /> Run Module 2 on Selected Variant</>
+                )}
+              </button>
+              {results?.selected_prediction && (
+                <div className="selected-chip">
+                  Selected: <strong>{results.selected_prediction.predicted_name}</strong> (nucleotide {results.selected_prediction.nucleotide})
+                </div>
+              )}
+            </div>
+
+            {ep && (
+              <div className="module2-results">
+                <h3>Module 2 Outputs (Selected Variant)</h3>
+                <div className="module2-grid">
+                  <div className="module2-card">
+                    <h4>Alpha / Beta / Gamma</h4>
+                    <p><strong>alpha:</strong> {ep.alpha ?? ep.sigma}</p>
+                    <p><strong>beta:</strong> {ep.beta}</p>
+                    <p><strong>gamma:</strong> {ep.gamma}</p>
+                  </div>
+                  <div className="module2-card">
+                    <h4>Host Adaptation</h4>
+                    <p><strong>human_adaptation_probability:</strong> {host?.human_adaptation_probability}</p>
+                    <p><strong>risk_score_percent:</strong> {host?.risk_score_percent}</p>
+                    <p><strong>predicted_host_label:</strong> {host?.predicted_host_label}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <h3>Biologically Plausible Variants</h3>
             <div className="predictions-grid">
               {results.predictions.map((pred, index) => (
-                <div key={index} className={`prediction-card ${pred.is_original ? 'original' : 'mutation'}`}>
+                <div
+                  key={index}
+                  className={`prediction-card ${pred.is_original ? 'original' : 'mutation'} ${selectedPredictionIndex === index ? 'selected' : ''}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedPredictionIndex(index)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') setSelectedPredictionIndex(index);
+                  }}
+                >
                   <div className="card-top">
                     <span className="rank-badge">#{index + 1}</span>
                     <h4 className="variant-name">{pred.predicted_name}</h4>
